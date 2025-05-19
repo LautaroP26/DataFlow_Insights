@@ -51,7 +51,8 @@ if st.session_state.get('mostrar_columnas'):
 
                     if chart_type == "Histograma":
                         if len(selected_columns) >= 1 and pd.api.types.is_numeric_dtype(df[selected_columns[0]]):
-                            fig = px.histogram(df, x=selected_columns[0], title=f"Histograma de {selected_columns[0]}")
+                            title = st.text_input("Titulo de Historigrama: ", f"Distribucion de {selected_columns[0]}")
+                            fig = px.histogram(df, x=selected_columns[0], title=title)
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos una columna numérica para el histograma.")
@@ -59,7 +60,8 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) >= 2 and all(pd.api.types.is_numeric_dtype(df[col]) for col in selected_columns[:2]):
                             x_col = st.selectbox("Selecciona la columna para el eje X", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para el eje Y", [col for col in selected_columns if col != x_col])
-                            fig = px.scatter(df, x=x_col, y=y_col, title=f"Gráfico de Dispersión: {x_col} vs {y_col}")
+                            title = st.time_input("Titulo de dispercion:", f'Distribucion de {selected_columns[0]}')
+                            fig = px.scatter(df, x=x_col, y=y_col, title=title)
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas numéricas para el gráfico de dispersión.")
@@ -67,7 +69,11 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) >= 2:
                             x_col = st.selectbox("Selecciona la columna para las categorías (X)", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para los valores (Y)", [col for col in selected_columns if col != x_col])
-                            fig = px.bar(df, x=x_col, y=y_col, title=f"Gráfico de Barras: {y_col} por {x_col}")
+                            title = st.text_input("Titulo del grafico de Dispercion: ", f"{y_col} vs {x_col}")
+                            x_label = st.text_input("Etiqueta del Eje X:", x_col)
+                            y_label = st.text_input("Etiqueta del Eje Y:", y_col)
+                            print(x_label)
+                            fig = px.scatter(df, x=x_col, y=y_col, title=title, labels={'x': x_label, 'y': y_label})
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de barras.")
@@ -75,7 +81,10 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) >= 2:
                             x_col = st.selectbox("Selecciona la columna para el eje X", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para el eje Y", [col for col in selected_columns if col != x_col])
-                            fig = px.line(df, x=x_col, y=y_col, title=f"Gráfico de Líneas: {y_col} vs {x_col}")
+                            title = st.text_input("Titulo del grafico de Líneas: ", f"{x_col} vs {y_col}")
+                            x_label = st.text_input("Etiqueta del Eje X:", x_col)
+                            y_label = st.text_input("Etiqueta del Eje Y:", y_col)
+                            fig = px.line(df, x=x_col, y=y_col, title=title, labels={'x':x_label, 'y':y_label})
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de líneas.")
