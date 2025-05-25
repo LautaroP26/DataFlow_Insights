@@ -40,7 +40,8 @@ if st.session_state.get('mostrar_columnas'):
                 if selected_columns:
                     st.subheader("Opciones de Visualización:")
                     chart_type = st.selectbox("Selecciona el tipo de gráfico",
-                                                ["Histograma", "Gráfico de Dispersión", "Gráfico de Barras", "Gráfico de Líneas"])
+                                                ["Histograma", "Gráfico de Dispersión", "Gráfico de Barras",
+                                                 "Gráfico de Líneas", "Gráfico de Pastel"])
 
                     st.subheader("Datos:")
                     data_payload = {'columns': selected_columns}
@@ -70,10 +71,7 @@ if st.session_state.get('mostrar_columnas'):
                             x_col = st.selectbox("Selecciona la columna para las categorías (X)", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para los valores (Y)", [col for col in selected_columns if col != x_col])
                             title = st.text_input("Titulo del grafico de Dispercion: ", f"{y_col} vs {x_col}")
-                            x_label = st.text_input("Etiqueta del Eje X:", x_col)
-                            y_label = st.text_input("Etiqueta del Eje Y:", y_col)
-                            print(x_label)
-                            fig = px.scatter(df, x=x_col, y=y_col, title=title, labels={'x': x_label, 'y': y_label})
+                            fig = px.scatter(df, x=x_col, y=y_col, title=title)
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de barras.")
@@ -82,12 +80,19 @@ if st.session_state.get('mostrar_columnas'):
                             x_col = st.selectbox("Selecciona la columna para el eje X", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para el eje Y", [col for col in selected_columns if col != x_col])
                             title = st.text_input("Titulo del grafico de Líneas: ", f"{x_col} vs {y_col}")
-                            x_label = st.text_input("Etiqueta del Eje X:", x_col)
-                            y_label = st.text_input("Etiqueta del Eje Y:", y_col)
-                            fig = px.line(df, x=x_col, y=y_col, title=title, labels={'x':x_label, 'y':y_label})
+                            fig = px.line(df, x=x_col, y=y_col, title=title)
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de líneas.")
+                    elif chart_type == "Gráfico de Pastel":
+                        if len(selected_columns) == 2:
+                            categorical_col = st.selectbox("Selecciona la columna Categórica", selected_columns)
+                            value_col = st.selectbox("Selecciona la columna de Valores", [col for col in selected_columns if col != categorical_col])
+                            title = st.text_input("Titulo del grafico de Torta", f'Porcion de {categorical_col} por {value_col}')
+                            fig = px.pie(df, names=categorical_col, values=value_col, title=title)
+                            st.plotly_chart(fig)
+                        else:
+                            st.warning("Selecciona al menos dos columnas para el gráfico de Pastel")
 
             else:
                 st.error(f"Error al obtener las columnas: {columnas_resultado.get('error', 'Error desconocido')}")
