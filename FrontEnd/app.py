@@ -38,22 +38,48 @@ if st.session_state.get('mostrar_columnas'):
                 st.subheader("Columnas disponibles:")
                 selected_columns = st.multiselect("Selecciona las columnas a analizar", columnas)
                 if selected_columns:
+                    st.sidebar.subheader("Filtros:")
+                    filters = {}
+                    data_for_filters_payload = {'columns' : selected_columns}
+                    response_filters_data = requests.post(f"{backend_url}/data_for_filters/{file_id}", json=data_for_filters_payload)
+                    response_filters_data.raise_for_status()
+                    filters_data = response_filters_data.json()
+
+                    for col in selected_columns:
+                        if col in filters_data['numeric_columns']:
+                            min_val = filters_data['numeric_ranges'][col]['min']
+                            max_val = filters_data['numeric_ranges'][col]['max']
+                            filter_range = st.sidebar.slider(
+                                f"Filtrar {col}",
+                                min_value=float(min_val),
+                                max_value=float(max_val),
+                                value=(float(min_val), float(max_val))
+                            )
+                            filters[col] = {'type' : 'numeric_range' , 'value' : filter_range}
+
+                        elif col in filters_data['categorical_columns']:
+                            unique_values = filters_data['categorical_values'][col]
+                            selected_values = st.sidebar.multiselect(f'Filtrar: {col}', unique_values)
+                            filters[col] = {'type' : 'categorical', 'value' : selected_values}
+
+                    st.subheader("Datos:")
+                    data_payload = {'columns': selected_columns, 'filters': filters}
+                    response_data = requests.post(f"{backend_url}/data/{file_id}", json=data_payload)
+                    response_data.raise_for_status()
+                    data_result = response_data.json()
+                    df = pd.DataFrame(data_result) 
+                    st.write(df)
+
                     st.subheader("Opciones de Visualización:")
                     chart_type = st.selectbox("Selecciona el tipo de gráfico",
                                                 ["Histograma", "Gráfico de Dispersión", "Gráfico de Barras",
                                                  "Gráfico de Líneas", "Gráfico de Pastel"])
 
-                    st.subheader("Datos:")
-                    data_payload = {'columns': selected_columns}
-                    response_data = requests.post(f"{backend_url}/data/{file_id}", json=data_payload)
-                    response_data.raise_for_status()
-                    data_result = response_data.json()
-                    df = pd.DataFrame(data_result) # Convertir a DataFrame para facilitar la visualización
 
                     if chart_type == "Histograma":
                         if len(selected_columns) >= 1 and pd.api.types.is_numeric_dtype(df[selected_columns[0]]):
                             title = st.text_input("Titulo de Historigrama: ", f"Distribucion de {selected_columns[0]}")
-                            fig = px.histogram(df, x=selected_columns[0], title=title)
+                            fig = px.histogram(df, x=selected_columns[0], title=title, hover_data=selected_columns) # Agregando tooltips
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos una columna numérica para el histograma.")
@@ -61,8 +87,8 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) >= 2 and all(pd.api.types.is_numeric_dtype(df[col]) for col in selected_columns[:2]):
                             x_col = st.selectbox("Selecciona la columna para el eje X", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para el eje Y", [col for col in selected_columns if col != x_col])
-                            title = st.time_input("Titulo de dispercion:", f'Distribucion de {selected_columns[0]}')
-                            fig = px.scatter(df, x=x_col, y=y_col, title=title)
+                            title = st.text_input("Titulo de Dispercion:", f'{y_col} vs {x_col}') # Corregido typo en input
+                            fig = px.scatter(df, x=x_col, y=y_col, title=title, hover_data=selected_columns) # Agregando tooltips
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas numéricas para el gráfico de dispersión.")
@@ -70,8 +96,8 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) >= 2:
                             x_col = st.selectbox("Selecciona la columna para las categorías (X)", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para los valores (Y)", [col for col in selected_columns if col != x_col])
-                            title = st.text_input("Titulo del grafico de Dispercion: ", f"{y_col} vs {x_col}")
-                            fig = px.scatter(df, x=x_col, y=y_col, title=title)
+                            title = st.text_input("Titulo del grafico de Barras: ", f"{y_col} por {x_col}")
+                            fig = px.bar(df, x=x_col, y=y_col, title=title, hover_data=selected_columns) # Agregando tooltips
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de barras.")
@@ -80,7 +106,7 @@ if st.session_state.get('mostrar_columnas'):
                             x_col = st.selectbox("Selecciona la columna para el eje X", selected_columns)
                             y_col = st.selectbox("Selecciona la columna para el eje Y", [col for col in selected_columns if col != x_col])
                             title = st.text_input("Titulo del grafico de Líneas: ", f"{x_col} vs {y_col}")
-                            fig = px.line(df, x=x_col, y=y_col, title=title)
+                            fig = px.line(df, x=x_col, y=y_col, title=title, hover_data=selected_columns) # Agregando tooltips
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de líneas.")
@@ -88,8 +114,8 @@ if st.session_state.get('mostrar_columnas'):
                         if len(selected_columns) == 2:
                             categorical_col = st.selectbox("Selecciona la columna Categórica", selected_columns)
                             value_col = st.selectbox("Selecciona la columna de Valores", [col for col in selected_columns if col != categorical_col])
-                            title = st.text_input("Titulo del grafico de Torta", f'Porcion de {categorical_col} por {value_col}')
-                            fig = px.pie(df, names=categorical_col, values=value_col, title=title)
+                            title = st.text_input("Titulo del grafico de Torta", f'Proporcion de {categorical_col} por {value_col}') # Corregido "Porcion" a "Proporcion"
+                            fig = px.pie(df, names=categorical_col, values=value_col, title=title, hover_data=[categorical_col, value_col]) # Agregando tooltips
                             st.plotly_chart(fig)
                         else:
                             st.warning("Selecciona al menos dos columnas para el gráfico de Pastel")
