@@ -57,7 +57,7 @@
                 var values = filterUIData.CategoricalUniqueValues[catCol];
                 <div>
                     <strong>@catCol (Categórico):</strong>
-                    <select multiple class="form-select form-select-sm" @onchange="(e) => UpdateCategoricalFilter(catCol, ((IEnumerable<object>)e.Value).ToList())">
+                    <select multiple class="form-select form-select-sm" @onchange="(e) => UpdateCategoricalFilter(catCol, (e.Value as IEnumerable<object>)?.ToList() ?? new List<object>())">
                         @foreach (var val in values)
                         {
                             var valStr = val.ToString();

@@ -193,7 +193,7 @@ namespace DataFlowInsights.Data
                             // Asegurarse de que la comparación de tipos sea robusta si los valores vienen de JSON (pueden ser int64 vs int32, etc.)
                             // Convertimos ambos a string para una comparación más simple y genérica en este contexto de datos dinámicos.
                             // Para un rendimiento óptimo con tipos conocidos, se haría una conversión/comparación de tipo específico.
-                            string? recordValueString = rawValue.ToString();
+                            string? recordValueString = rawValue?.ToString(); // Comprobación de nulabilidad aquí
                             return filter.CategoricalValues.Any(catVal => catVal?.ToString() == recordValueString);
                         }
                         return true; // Si el filtro no es aplicable o está mal configurado, no se filtra por él
