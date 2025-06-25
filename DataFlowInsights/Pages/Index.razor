@@ -1,0 +1,653 @@
+@page "/"
+@using DataFlowInsights.Data
+@inject DataService dataService
+@inject IJSRuntime JSRuntime // Para futuras interacciones con Plotly.js
+
+<PageTitle>DataFlow Insights .NET</PageTitle>
+
+<h1>DataFlow Insights .NET</h1>
+
+<div class="mb-3">
+    <label for="fileUpload" class="form-label">Carga tu archivo de datos (CSV):</label>
+    <InputFile id="fileUpload" OnChange="HandleFileSelected" class="form-control" accept=".csv" />
+</div>
+
+@if (!string.IsNullOrEmpty(fileProcessingMessage))
+{
+    <div class="alert @(isFileError ? "alert-danger" : "alert-success")">@fileProcessingMessage</div>
+}
+
+@if (currentFileId != null && availableColumns.Any())
+{
+    <div class="my-3">
+        <h3>Columnas Disponibles:</h3>
+        @foreach (var column in availableColumns)
+        {
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="@column" id="checkbox-@column"
+                       @onchange="() => ColumnSelectionChanged(column, !selectedColumns.Contains(column))"
+                       checked="@selectedColumns.Contains(column)" />
+                <label class="form-check-label" for="checkbox-@column">
+                    @column
+                </label>
+            </div>
+        }
+    </div>
+}
+
+@if (selectedColumns.Any() && currentFileId != null)
+{
+    <div class="my-3">
+        <h3>Filtros:</h3>
+        @if (filterUIData != null)
+        {
+            foreach (var numericCol in filterUIData.SelectedNumericColumns)
+            {
+                var range = filterUIData.NumericRanges[numericCol];
+                // Necesitaríamos un componente slider o dos inputs numéricos aquí.
+                // Por simplicidad, mostraré el rango y luego implementaremos inputs.
+                <div>
+                    <strong>@numericCol (Numérico):</strong> Min: @range.Min, Max: @range.Max
+                    <input type="number" class="form-control form-control-sm d-inline-block w-auto" value="@(appliedFilters.FirstOrDefault(f => f.ColumnName == numericCol)?.NumericRangeValue?.Min ?? range.Min)" @onchange="(e) => UpdateNumericFilter(numericCol, Convert.ToDouble(e.Value), true)" placeholder="Min"/>
+                    <input type="number" class="form-control form-control-sm d-inline-block w-auto" value="@(appliedFilters.FirstOrDefault(f => f.ColumnName == numericCol)?.NumericRangeValue?.Max ?? range.Max)" @onchange="(e) => UpdateNumericFilter(numericCol, Convert.ToDouble(e.Value), false)" placeholder="Max"/>
+                </div>
+            }
+            foreach (var catCol in filterUIData.SelectedCategoricalColumns)
+            {
+                var values = filterUIData.CategoricalUniqueValues[catCol];
+                <div>
+                    <strong>@catCol (Categórico):</strong>
+                    <select multiple class="form-select form-select-sm" @onchange="(e) => UpdateCategoricalFilter(catCol, ((IEnumerable<object>)e.Value).ToList())">
+                        @foreach (var val in values)
+                        {
+                            var valStr = val.ToString();
+                            <option value="@valStr" selected="@(appliedFilters.FirstOrDefault(f => f.ColumnName == catCol)?.CategoricalValues?.Any(cv => cv?.ToString() == valStr) ?? false)">
+                                @valStr
+                            </option>
+                        }
+                    </select>
+                </div>
+            }
+        }
+        else
+        {
+            <p>Cargando datos para filtros...</p>
+        }
+    </div>
+
+    <div class="my-3">
+        <h3>Datos Filtrados:</h3>
+        @if (filteredDataRecords != null && filteredDataRecords.Any())
+        {
+            <table class="table table-striped table-sm">
+                <thead>
+                    <tr>
+                        @foreach (var colName in selectedColumns)
+                        {
+                            <th>@colName</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var record in filteredDataRecords)
+                    {
+                        <tr>
+                            @foreach (var colName in selectedColumns)
+                            {
+                                var dict = record as IDictionary<string, object>;
+                                <td>@(dict != null && dict.TryGetValue(colName, out var value) ? value : "")</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else if (isLoadingFilteredData)
+        {
+             <p>Cargando datos...</p>
+        }
+        else
+        {
+            <p>No hay datos para mostrar con los filtros actuales o columnas seleccionadas.</p>
+        }
+    </div>
+
+    @* Aquí irán las opciones de visualización y los gráficos *@
+    <div class="my-3">
+        <h3>Visualizaciones:</h3>
+        <div class="row">
+            <div class="col-md-3">
+                <label for="chartTypeSelect" class="form-label">Tipo de Gráfico:</label>
+                <select id="chartTypeSelect" class="form-select" @onchange="UpdateChartType">
+                    <option value="">Seleccione un tipo</option>
+                    <option value="Histograma">Histograma</option>
+                    <option value="Gráfico de Dispersión">Gráfico de Dispersión</option>
+                    <option value="Gráfico de Barras">Gráfico de Barras</option>
+                    <option value="Gráfico de Líneas">Gráfico de Líneas</option>
+                    <option value="Gráfico de Pastel">Gráfico de Pastel</option>
+                </select>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(selectedChartType) && filteredDataRecords != null && filteredDataRecords.Any())
+        {
+            <div class="row mt-2">
+                @if (selectedChartType == "Histograma")
+                {
+                    <div class="col-md-3">
+                        <label class="form-label">Columna (Numérica):</label>
+                        <select class="form-select" @bind="chartColumnX">
+                            <option value="">Seleccione columna</option>
+                            @foreach (var col in GetNumericColumnsForChart()) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                }
+                else if (selectedChartType == "Gráfico de Dispersión")
+                {
+                    <div class="col-md-3">
+                        <label class="form-label">Columna X (Numérica):</label>
+                        <select class="form-select" @bind="chartColumnX">
+                            <option value="">Seleccione columna X</option>
+                            @foreach (var col in GetNumericColumnsForChart()) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Columna Y (Numérica):</label>
+                        <select class="form-select" @bind="chartColumnY">
+                            <option value="">Seleccione columna Y</option>
+                            @foreach (var col in GetNumericColumnsForChart(chartColumnX)) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                }
+                else if (selectedChartType == "Gráfico de Barras" || selectedChartType == "Gráfico de Líneas")
+                {
+                    <div class="col-md-3">
+                        <label class="form-label">Columna Categorías (X):</label>
+                        <select class="form-select" @bind="chartColumnX">
+                             <option value="">Seleccione columna X</option>
+                            @foreach (var col in selectedColumns) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Columna Valores (Y):</label>
+                        <select class="form-select" @bind="chartColumnY">
+                            <option value="">Seleccione columna Y</option>
+                            @foreach (var col in selectedColumns.Where(c => c != chartColumnX)) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                }
+                else if (selectedChartType == "Gráfico de Pastel")
+                {
+                    <div class="col-md-3">
+                        <label class="form-label">Columna Nombres (Categórica):</label>
+                        <select class="form-select" @bind="chartColumnX">
+                            <option value="">Seleccione columna</option>
+                            @foreach (var col in GetCategoricalColumnsForChart()) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Columna Valores (Numérica):</label>
+                        <select class="form-select" @bind="chartColumnY">
+                             <option value="">Seleccione columna</option>
+                            @foreach (var col in GetNumericColumnsForChart(chartColumnX)) { <option value="@col">@col</option> }
+                        </select>
+                    </div>
+                }
+            </div>
+            <div class="row mt-2">
+                 <div class="col-md-6">
+                    <label class="form-label">Título del Gráfico:</label>
+                    <input type="text" class="form-control" @bind="chartTitle"/>
+                </div>
+                <div class="col-md-2 align-self-end">
+                     <button class="btn btn-primary" @onclick="RenderChart">Generar Gráfico</button>
+                </div>
+            </div>
+        }
+
+        <div id="chartDiv" style="width:100%; height:450px; margin-top: 20px;"></div>
+        @if (!string.IsNullOrEmpty(chartErrorMessage))
+        {
+            <div class="alert alert-warning mt-2">@chartErrorMessage</div>
+        }
+    </div>
+}
+
+
+@code {
+    private string? currentFileId;
+    private List<string> availableColumns = new List<string>();
+    private List<string> selectedColumns = new List<string>();
+    private ColumnFilterInfo? filterUIData;
+    private List<AppliedFilter> appliedFilters = new List<AppliedFilter>();
+    private List<dynamic>? filteredDataRecords;
+
+    private string? fileProcessingMessage;
+    private bool isFileError = false;
+    private bool isLoadingFilteredData = false;
+
+    // Propiedades para la selección de gráficos
+    private string selectedChartType = "";
+    private string? chartColumnX, chartColumnY, chartTitle;
+    private string? chartErrorMessage;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        isFileError = false;
+        fileProcessingMessage = "Procesando archivo...";
+        selectedColumns.Clear();
+        availableColumns.Clear();
+        filterUIData = null;
+        appliedFilters.Clear();
+        filteredDataRecords = null;
+        currentFileId = null;
+        await ClearChart(); // Limpiar gráfico anterior
+        StateHasChanged(); // Actualizar UI
+
+        var file = e.File;
+        if (file == null)
+        {
+            fileProcessingMessage = "No se seleccionó ningún archivo.";
+            isFileError = true;
+            return;
+        }
+
+        var (success, message, fileId) = await dataService.LoadCsvDataAsync(file);
+        fileProcessingMessage = message;
+        isFileError = !success;
+
+        if (success && fileId != null)
+        {
+            currentFileId = fileId;
+            availableColumns = dataService.GetColumnNames(currentFileId) ?? new List<string>();
+        }
+        StateHasChanged();
+    }
+
+    private async Task ColumnSelectionChanged(string columnName, bool isSelected)
+    {
+        if (isSelected)
+        {
+            if (!selectedColumns.Contains(columnName))
+            {
+                selectedColumns.Add(columnName);
+            }
+        }
+        else
+        {
+            selectedColumns.Remove(columnName);
+        }
+
+        // Resetear filtros y datos si las columnas cambian significativamente
+        filterUIData = null;
+        appliedFilters.Clear();
+        filteredDataRecords = null;
+        await ClearChart();
+
+        await LoadDataForFiltersAndApply();
+    }
+
+    private async Task LoadDataForFiltersAndApply()
+    {
+        if (currentFileId != null && selectedColumns.Any())
+        {
+            filterUIData = dataService.GetDataForFilters(currentFileId, selectedColumns);
+            await ApplyFiltersAndLoadData();
+        }
+        else
+        {
+            filterUIData = null; // Limpiar datos de filtros si no hay columnas
+            filteredDataRecords = null;
+            await ClearChart();
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApplyFiltersAndLoadData()
+    {
+        if (currentFileId != null && selectedColumns.Any())
+        {
+            isLoadingFilteredData = true;
+            StateHasChanged(); // Para mostrar mensaje de carga
+
+            // Simular una pequeña demora como si fuera una llamada asíncrona real más larga
+            await Task.Delay(50);
+
+            filteredDataRecords = dataService.GetFilteredData(currentFileId, selectedColumns, appliedFilters);
+            isLoadingFilteredData = false;
+        }
+        else
+        {
+            filteredDataRecords = null;
+        }
+        StateHasChanged();
+        await RenderChart(); // Intentar renderizar el gráfico con los nuevos datos si hay una configuración válida
+    }
+
+    private void UpdateNumericFilter(string columnName, double value, bool isMin)
+    {
+        var filter = appliedFilters.FirstOrDefault(f => f.ColumnName == columnName && f.Type == FilterType.NumericRange);
+        var baseRange = filterUIData?.NumericRanges[columnName];
+        if (baseRange == null) return;
+
+        if (filter == null)
+        {
+            filter = new AppliedFilter { ColumnName = columnName, Type = FilterType.NumericRange, NumericRangeValue = new NumericRange { Min = baseRange.Min, Max = baseRange.Max } };
+            appliedFilters.Add(filter);
+        }
+
+        if (filter.NumericRangeValue == null) // Debería existir si el tipo es NumericRange, pero por seguridad
+        {
+             filter.NumericRangeValue = new NumericRange { Min = baseRange.Min, Max = baseRange.Max };
+        }
+
+        if (isMin) filter.NumericRangeValue.Min = value;
+        else filter.NumericRangeValue.Max = value;
+
+        // Validar que min no sea mayor que max
+        if (filter.NumericRangeValue.Min > filter.NumericRangeValue.Max)
+        {
+            if(isMin) filter.NumericRangeValue.Min = filter.NumericRangeValue.Max;
+            else filter.NumericRangeValue.Max = filter.NumericRangeValue.Min;
+        }
+
+        _ = ApplyFiltersAndLoadData(); // Ejecutar sin esperar para no bloquear UI, Blazor se encarga
+    }
+
+    private void UpdateCategoricalFilter(string columnName, List<object> selectedValues)
+    {
+        appliedFilters.RemoveAll(f => f.ColumnName == columnName && f.Type == FilterType.Categorical);
+        if (selectedValues != null && selectedValues.Any())
+        {
+            // Los valores de <select multiple> vienen como strings.
+            // Si los datos originales en CategoricalUniqueValues no son strings, necesitaríamos convertir.
+            // Por ahora, asumimos que la comparación por string en GetFilteredData es suficiente o que los datos son strings.
+            appliedFilters.Add(new AppliedFilter { ColumnName = columnName, Type = FilterType.Categorical, CategoricalValues = selectedValues });
+        }
+        _ = ApplyFiltersAndLoadData();
+    }
+
+    private async Task UpdateChartType(ChangeEventArgs e)
+    {
+        selectedChartType = e.Value?.ToString() ?? "";
+        chartColumnX = null;
+        chartColumnY = null;
+        chartTitle = ""; // Resetear título
+        chartErrorMessage = null; // Limpiar errores
+        await ClearChart();
+        StateHasChanged();
+    }
+
+    private List<string> GetNumericColumnsForChart(string? excludeColumn = null)
+    {
+        var numericCols = filterUIData?.SelectedNumericColumns ?? new List<string>();
+        return excludeColumn == null ? numericCols : numericCols.Where(c => c != excludeColumn).ToList();
+    }
+
+    private List<string> GetCategoricalColumnsForChart(string? excludeColumn = null)
+    {
+        var catCols = filterUIData?.SelectedCategoricalColumns ?? new List<string>();
+         return excludeColumn == null ? catCols : catCols.Where(c => c != excludeColumn).ToList();
+    }
+
+    private async Task RenderChart()
+    {
+        chartErrorMessage = null; // Limpiar errores previos
+        if (string.IsNullOrEmpty(selectedChartType) || filteredDataRecords == null || !filteredDataRecords.Any())
+        {
+            await ClearChart(); // Limpia el div si no hay nada que mostrar
+            return;
+        }
+
+        List<object> traces = new List<object>();
+        object layout = new { title = string.IsNullOrEmpty(chartTitle) ? $"Gráfico: {selectedChartType}" : chartTitle };
+
+        try
+        {
+            if (selectedChartType == "Histograma")
+            {
+                if (string.IsNullOrEmpty(chartColumnX) || !(filterUIData?.SelectedNumericColumns.Contains(chartColumnX) ?? false) )
+                {
+                    chartErrorMessage = "Seleccione una columna numérica para el histograma.";
+                    await ClearChart(); return;
+                }
+                var xValues = filteredDataRecords.Select(r => Convert.ToDouble(((IDictionary<string, object>)r)[chartColumnX])).ToList();
+                traces.Add(new { x = xValues, type = "histogram" });
+                if(string.IsNullOrEmpty(chartTitle)) layout = new { title = $"Distribución de {chartColumnX}"};
+            }
+            else if (selectedChartType == "Gráfico de Dispersión")
+            {
+                if (string.IsNullOrEmpty(chartColumnX) || string.IsNullOrEmpty(chartColumnY) ||
+                    !(filterUIData?.SelectedNumericColumns.Contains(chartColumnX) ?? false) ||
+                    !(filterUIData?.SelectedNumericColumns.Contains(chartColumnY) ?? false) ||
+                    chartColumnX == chartColumnY)
+                {
+                    chartErrorMessage = "Seleccione dos columnas numéricas diferentes para el gráfico de dispersión.";
+                     await ClearChart(); return;
+                }
+                var xValues = filteredDataRecords.Select(r => Convert.ToDouble(((IDictionary<string, object>)r)[chartColumnX])).ToList();
+                var yValues = filteredDataRecords.Select(r => Convert.ToDouble(((IDictionary<string, object>)r)[chartColumnY])).ToList();
+                traces.Add(new { x = xValues, y = yValues, mode = "markers", type = "scatter" });
+                 if(string.IsNullOrEmpty(chartTitle)) layout = new { title = $"{chartColumnY} vs {chartColumnX}", xaxis = new { title = chartColumnX }, yaxis = new { title = chartColumnY } };
+            }
+            else if (selectedChartType == "Gráfico de Barras" || selectedChartType == "Gráfico de Líneas")
+            {
+                if (string.IsNullOrEmpty(chartColumnX) || string.IsNullOrEmpty(chartColumnY) || chartColumnX == chartColumnY)
+                {
+                    chartErrorMessage = "Seleccione dos columnas diferentes (X para categorías/eje, Y para valores).";
+                     await ClearChart(); return;
+                }
+                // Para barras/líneas, X podría ser categórico o numérico, Y usualmente numérico.
+                // Esta es una simplificación, se podría necesitar agregación si X no es único.
+                var xValues = filteredDataRecords.Select(r => ((IDictionary<string, object>)r)[chartColumnX]).ToList();
+                var yValues = filteredDataRecords.Select(r => Convert.ToDouble(((IDictionary<string, object>)r)[chartColumnY])).ToList(); // Asumimos Y numérico
+                traces.Add(new { x = xValues, y = yValues, type = (selectedChartType == "Gráfico de Barras" ? "bar" : "scatter"), mode = (selectedChartType == "Gráfico de Líneas" ? "lines+markers" : null) });
+                 if(string.IsNullOrEmpty(chartTitle)) layout = new { title = $"{chartColumnY} por {chartColumnX}", xaxis = new { title = chartColumnX }, yaxis = new { title = chartColumnY } };
+            }
+            else if (selectedChartType == "Gráfico de Pastel")
+            {
+                 if (string.IsNullOrEmpty(chartColumnX) || string.IsNullOrEmpty(chartColumnY) ||
+                    !(filterUIData?.SelectedCategoricalColumns.Contains(chartColumnX) ?? false) || // Nombres deben ser categóricos
+                    !(filterUIData?.SelectedNumericColumns.Contains(chartColumnY) ?? false) || // Valores deben ser numéricos
+                     chartColumnX == chartColumnY)
+                {
+                    chartErrorMessage = "Seleccione una columna categórica para nombres y una numérica diferente para valores para el gráfico de pastel.";
+                     await ClearChart(); return;
+                }
+                var labels = filteredDataRecords.Select(r => ((IDictionary<string, object>)r)[chartColumnX]?.ToString()).ToList();
+                var values = filteredDataRecords.Select(r => Convert.ToDouble(((IDictionary<string, object>)r)[chartColumnY])).ToList();
+                traces.Add(new { labels = labels, values = values, type = "pie" });
+                 if(string.IsNullOrEmpty(chartTitle)) layout = new { title = $"Proporción de {chartColumnX} por {chartColumnY}"};
+            }
+
+            if (traces.Any())
+            {
+                await JSRuntime.InvokeVoidAsync("plotlyInterop.createOrUpdateChart", "chartDiv", selectedChartType, traces, layout);
+            }
+            else if (string.IsNullOrEmpty(chartErrorMessage)) // Si no se generaron trazas pero no hubo error específico
+            {
+                // chartErrorMessage = "No se pudieron generar datos para el gráfico con la configuración actual.";
+                await ClearChart(); // Limpia si no hay nada que graficar
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error rendering chart: {ex}");
+            chartErrorMessage = $"Error al generar el gráfico: {ex.Message}. Verifique la selección de columnas y tipos de datos.";
+            await ClearChart();
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearChart()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("plotlyInterop.purge", "chartDiv");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error clearing chart: {ex.Message}");
+            // No es crítico si falla, pero puede dejar el div con contenido viejo.
+        }
+    }
+
+    // Limpiar el gráfico cuando se eliminan todas las columnas seleccionadas o se deselecciona el archivo
+    protected override async Task OnParametersSetAsync()
+    {
+        if (currentFileId == null || !selectedColumns.Any())
+        {
+            await ClearChart();
+            selectedChartType = ""; // Resetear tipo de gráfico
+            chartColumnX = null;
+            chartColumnY = null;
+            chartTitle = "";
+            chartErrorMessage = null;
+        }
+    }
+    private List<string> availableColumns = new List<string>();
+    private List<string> selectedColumns = new List<string>();
+    private ColumnFilterInfo? filterUIData;
+    private List<AppliedFilter> appliedFilters = new List<AppliedFilter>();
+    private List<dynamic>? filteredDataRecords;
+
+    private string? fileProcessingMessage;
+    private bool isFileError = false;
+    private bool isLoadingFilteredData = false;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        isFileError = false;
+        fileProcessingMessage = "Procesando archivo...";
+        selectedColumns.Clear();
+        availableColumns.Clear();
+        filterUIData = null;
+        appliedFilters.Clear();
+        filteredDataRecords = null;
+        currentFileId = null;
+        StateHasChanged(); // Actualizar UI
+
+        var file = e.File;
+        if (file == null)
+        {
+            fileProcessingMessage = "No se seleccionó ningún archivo.";
+            isFileError = true;
+            return;
+        }
+
+        var (success, message, fileId) = await dataService.LoadCsvDataAsync(file);
+        fileProcessingMessage = message;
+        isFileError = !success;
+
+        if (success && fileId != null)
+        {
+            currentFileId = fileId;
+            availableColumns = dataService.GetColumnNames(currentFileId) ?? new List<string>();
+        }
+        StateHasChanged();
+    }
+
+    private async Task ColumnSelectionChanged(string columnName, bool isSelected)
+    {
+        if (isSelected)
+        {
+            if (!selectedColumns.Contains(columnName))
+            {
+                selectedColumns.Add(columnName);
+            }
+        }
+        else
+        {
+            selectedColumns.Remove(columnName);
+        }
+
+        // Resetear filtros y datos si las columnas cambian significativamente
+        filterUIData = null;
+        appliedFilters.Clear();
+        filteredDataRecords = null;
+
+        await LoadDataForFiltersAndApply();
+    }
+
+    private async Task LoadDataForFiltersAndApply()
+    {
+        if (currentFileId != null && selectedColumns.Any())
+        {
+            filterUIData = dataService.GetDataForFilters(currentFileId, selectedColumns);
+            await ApplyFiltersAndLoadData();
+        }
+        else
+        {
+            filterUIData = null; // Limpiar datos de filtros si no hay columnas
+            filteredDataRecords = null;
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApplyFiltersAndLoadData()
+    {
+        if (currentFileId != null && selectedColumns.Any())
+        {
+            isLoadingFilteredData = true;
+            StateHasChanged(); // Para mostrar mensaje de carga
+
+            // Simular una pequeña demora como si fuera una llamada asíncrona real más larga
+            await Task.Delay(50);
+
+            filteredDataRecords = dataService.GetFilteredData(currentFileId, selectedColumns, appliedFilters);
+            isLoadingFilteredData = false;
+        }
+        else
+        {
+            filteredDataRecords = null;
+        }
+        StateHasChanged();
+        // Aquí se llamaría a la lógica para actualizar gráficos
+    }
+
+    private void UpdateNumericFilter(string columnName, double value, bool isMin)
+    {
+        var filter = appliedFilters.FirstOrDefault(f => f.ColumnName == columnName && f.Type == FilterType.NumericRange);
+        var baseRange = filterUIData?.NumericRanges[columnName];
+        if (baseRange == null) return;
+
+        if (filter == null)
+        {
+            filter = new AppliedFilter { ColumnName = columnName, Type = FilterType.NumericRange, NumericRangeValue = new NumericRange { Min = baseRange.Min, Max = baseRange.Max } };
+            appliedFilters.Add(filter);
+        }
+
+        if (filter.NumericRangeValue == null) // Debería existir si el tipo es NumericRange, pero por seguridad
+        {
+             filter.NumericRangeValue = new NumericRange { Min = baseRange.Min, Max = baseRange.Max };
+        }
+
+        if (isMin) filter.NumericRangeValue.Min = value;
+        else filter.NumericRangeValue.Max = value;
+
+        // Validar que min no sea mayor que max
+        if (filter.NumericRangeValue.Min > filter.NumericRangeValue.Max)
+        {
+            if(isMin) filter.NumericRangeValue.Min = filter.NumericRangeValue.Max;
+            else filter.NumericRangeValue.Max = filter.NumericRangeValue.Min;
+        }
+
+        _ = ApplyFiltersAndLoadData(); // Ejecutar sin esperar para no bloquear UI, Blazor se encarga
+    }
+
+    private void UpdateCategoricalFilter(string columnName, List<object> selectedValues)
+    {
+        appliedFilters.RemoveAll(f => f.ColumnName == columnName && f.Type == FilterType.Categorical);
+        if (selectedValues != null && selectedValues.Any())
+        {
+            // Los valores de <select multiple> vienen como strings.
+            // Si los datos originales en CategoricalUniqueValues no son strings, necesitaríamos convertir.
+            // Por ahora, asumimos que la comparación por string en GetFilteredData es suficiente o que los datos son strings.
+            appliedFilters.Add(new AppliedFilter { ColumnName = columnName, Type = FilterType.Categorical, CategoricalValues = selectedValues });
+        }
+        _ = ApplyFiltersAndLoadData();
+    }
+}
