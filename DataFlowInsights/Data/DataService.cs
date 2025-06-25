@@ -37,11 +37,16 @@ namespace DataFlowInsights.Data
                 var fileId = Guid.NewGuid().ToString();
                 var fileData = new FileData { FileId = fileId, FileName = file.Name, UploadTime = DateTime.UtcNow };
 
-                // CsvHelper necesita un Stream para leer.
-                // Abrimos un stream desde IBrowserFile.
-                // Usamos ReadOnlySharedStreamAsync para evitar problemas con streams grandes en Blazor Server.
-                await using var stream = file.OpenReadStream(_maxFileSize);
-                using var reader = new StreamReader(stream);
+                // CsvHelper necesita un Stream que soporte lecturas síncronas.
+                // IBrowserFile.OpenReadStream() devuelve un stream que no las soporta directamente
+                // para algunas operaciones síncronas de CsvReader.
+                // Solución: Leer asíncronamente a un MemoryStream primero.
+                await using var browserFileStream = file.OpenReadStream(_maxFileSize);
+                using var memoryStream = new MemoryStream();
+                await browserFileStream.CopyToAsync(memoryStream);
+                memoryStream.Position = 0; // Resetear la posición del MemoryStream al inicio
+
+                using var reader = new StreamReader(memoryStream); // Usar el MemoryStream
                 using var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
                     // Opcional: Configurar CsvHelper si es necesario (ej. delimitador, cabeceras)
