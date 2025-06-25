@@ -230,6 +230,42 @@
     private string selectedChartType = "";
     private string? chartColumnX, chartColumnY, chartTitle;
     private string? chartErrorMessage;
+    private bool _shouldClearChartAfterRender = false;
+    private bool _isInitialRender = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isInitialRender = false; // Marcar que la primera renderización ya ocurrió
+        }
+
+        if (_shouldClearChartAfterRender)
+        {
+            // Solo intentar purgar si el div podría haber existido o no existe ahora
+            // y no estamos en la primera carga donde es seguro que no existe aún.
+            // O, más simple: si el div no está presente según las condiciones, no hacer nada.
+             if (!(selectedColumns.Any() && currentFileId != null) || _isInitialRender)
+            {
+                 // No es necesario llamar a purge si el div no está en el DOM.
+                 // Podríamos incluso quitar la llamada a ClearChart si sabemos que el div no está.
+            }
+            else
+            {
+                // Si el div DEBERÍA estar pero ahora no está (o queremos limpiar), intentamos purgar.
+                // Esta lógica puede ser compleja. Una forma más segura es solo llamar a ClearChart
+                // cuando estamos seguros de que el div está y queremos limpiarlo,
+                // o cuando el gráfico se oculta y queremos liberar recursos.
+            }
+            // La llamada a ClearChart() desde OnParametersSetAsync era problemática.
+            // La idea es que si las condiciones para mostrar el gráfico ya no se cumplen,
+            // el div#chartDiv simplemente no se renderizará. Plotly no tendrá nada sobre lo que actuar.
+            // Lo que sí necesitamos es limpiar el estado del gráfico si los datos cambian.
+            // ClearChart ahora se llama en contextos más seguros.
+            _shouldClearChartAfterRender = false;
+        }
+    }
+
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
